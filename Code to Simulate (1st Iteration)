@@ -1,18 +1,23 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fftpack import fftn, ifftn, fftfreq
+
 # Simulation parameters
 N = 64  # Grid size (increase for higher resolution)
-L = 2 * np.pi  # Domain size (periodic)
+L = 2 * np.pi  # Domain size (periodic boundary conditions)
 nu = 0.01  # Viscosity
 dt = 0.01  # Time step
 T = 5.0  # Total simulation time
+
+# Calculate number of time steps
+num_steps = int(T / dt)
 
 # Wave numbers (for spectral differentiation)
 k = fftfreq(N, d=L/(2*np.pi*N)) * N
 kx, ky, kz = np.meshgrid(k, k, k, indexing="ij")
 k_squared = kx**2 + ky**2 + kz**2
 k_squared[k_squared == 0] = 1  # Avoid division by zero
+
 # Random initial velocity field in Fourier space
 np.random.seed(42)
 u0 = np.random.randn(N, N, N)
@@ -29,14 +34,18 @@ k_dot_u_hat = kx * u_hat + ky * v_hat + kz * w_hat
 u_hat -= kx * k_dot_u_hat / k_squared
 v_hat -= ky * k_dot_u_hat / k_squared
 w_hat -= kz * k_dot_u_hat / k_squared
+
+# Time evolution tracking
+time = []
+vorticity_max = []
+t = 0
+
 def nonlinear_term(u_hat, v_hat, w_hat):
     """ Compute the nonlinear term (u ⋅ ∇)u in Fourier space. """
-    # Transform to physical space
     u = np.real(ifftn(u_hat))
     v = np.real(ifftn(v_hat))
     w = np.real(ifftn(w_hat))
 
-    # Compute derivatives in Fourier space
     ux_hat, uy_hat, uz_hat = fftn(u), fftn(v), fftn(w)
     du_dx = np.real(ifftn(1j * kx * ux_hat))
     du_dy = np.real(ifftn(1j * ky * ux_hat))
@@ -58,9 +67,6 @@ def nonlinear_term(u_hat, v_hat, w_hat):
     return -fftn(conv_u), -fftn(conv_v), -fftn(conv_w)
 
 # Time integration loop
-t = 0
-vorticity_max = []
-
 while t < T:
     # Compute nonlinear term
     N_u, N_v, N_w = nonlinear_term(u_hat, v_hat, w_hat)
@@ -80,11 +86,20 @@ while t < T:
     omega_z = np.real(ifftn(1j * kx * v_hat - 1j * ky * u_hat))
 
     omega_mag = np.sqrt(omega_x**2 + omega_y**2 + omega_z**2)
+    
+    # Append data to lists
     vorticity_max.append(np.max(omega_mag))
+    time.append(t)
+    
+    t += dt  # Increment time
 
-    t += dt
+# Convert to numpy arrays
+time = np.array(time)
+vorticity_max = np.array(vorticity_max)
+
+# Plot Vorticity Evolution
 plt.figure(figsize=(8, 5))
-plt.plot(np.arange(0, T, dt), vorticity_max, label=r"$\|\nabla \times \mathbf{u}\|_{L^\infty}$")
+plt.plot(time, vorticity_max, label=r"$\|\nabla \times \mathbf{u}\|_{L^\infty}$")
 plt.xlabel("Time")
 plt.ylabel("Max Vorticity")
 plt.title("Vorticity Growth in 3D Navier-Stokes Simulation")
