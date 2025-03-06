@@ -1,0 +1,93 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.fftpack import fftn, ifftn, fftfreq
+# Simulation parameters
+N = 64  # Grid size (increase for higher resolution)
+L = 2 * np.pi  # Domain size (periodic)
+nu = 0.01  # Viscosity
+dt = 0.01  # Time step
+T = 5.0  # Total simulation time
+
+# Wave numbers (for spectral differentiation)
+k = fftfreq(N, d=L/(2*np.pi*N)) * N
+kx, ky, kz = np.meshgrid(k, k, k, indexing="ij")
+k_squared = kx**2 + ky**2 + kz**2
+k_squared[k_squared == 0] = 1  # Avoid division by zero
+# Random initial velocity field in Fourier space
+np.random.seed(42)
+u0 = np.random.randn(N, N, N)
+v0 = np.random.randn(N, N, N)
+w0 = np.random.randn(N, N, N)
+
+# Transform to Fourier space
+u_hat = fftn(u0)
+v_hat = fftn(v0)
+w_hat = fftn(w0)
+
+# Enforce incompressibility (Helmholtz projection)
+k_dot_u_hat = kx * u_hat + ky * v_hat + kz * w_hat
+u_hat -= kx * k_dot_u_hat / k_squared
+v_hat -= ky * k_dot_u_hat / k_squared
+w_hat -= kz * k_dot_u_hat / k_squared
+def nonlinear_term(u_hat, v_hat, w_hat):
+    """ Compute the nonlinear term (u ⋅ ∇)u in Fourier space. """
+    # Transform to physical space
+    u = np.real(ifftn(u_hat))
+    v = np.real(ifftn(v_hat))
+    w = np.real(ifftn(w_hat))
+
+    # Compute derivatives in Fourier space
+    ux_hat, uy_hat, uz_hat = fftn(u), fftn(v), fftn(w)
+    du_dx = np.real(ifftn(1j * kx * ux_hat))
+    du_dy = np.real(ifftn(1j * ky * ux_hat))
+    du_dz = np.real(ifftn(1j * kz * ux_hat))
+
+    dv_dx = np.real(ifftn(1j * kx * uy_hat))
+    dv_dy = np.real(ifftn(1j * ky * uy_hat))
+    dv_dz = np.real(ifftn(1j * kz * uy_hat))
+
+    dw_dx = np.real(ifftn(1j * kx * uz_hat))
+    dw_dy = np.real(ifftn(1j * ky * uz_hat))
+    dw_dz = np.real(ifftn(1j * kz * uz_hat))
+
+    # Compute convective term
+    conv_u = u * du_dx + v * du_dy + w * du_dz
+    conv_v = u * dv_dx + v * dv_dy + w * dv_dz
+    conv_w = u * dw_dx + v * dw_dy + w * dw_dz
+
+    return -fftn(conv_u), -fftn(conv_v), -fftn(conv_w)
+
+# Time integration loop
+t = 0
+vorticity_max = []
+
+while t < T:
+    # Compute nonlinear term
+    N_u, N_v, N_w = nonlinear_term(u_hat, v_hat, w_hat)
+
+    # Update velocity field using IMEX scheme
+    u_hat = (u_hat + dt * N_u) / (1 + nu * dt * k_squared)
+    v_hat = (v_hat + dt * N_v) / (1 + nu * dt * k_squared)
+    w_hat = (w_hat + dt * N_w) / (1 + nu * dt * k_squared)
+
+    # Compute vorticity in physical space
+    u = np.real(ifftn(u_hat))
+    v = np.real(ifftn(v_hat))
+    w = np.real(ifftn(w_hat))
+
+    omega_x = np.real(ifftn(1j * ky * w_hat - 1j * kz * v_hat))
+    omega_y = np.real(ifftn(1j * kz * u_hat - 1j * kx * w_hat))
+    omega_z = np.real(ifftn(1j * kx * v_hat - 1j * ky * u_hat))
+
+    omega_mag = np.sqrt(omega_x**2 + omega_y**2 + omega_z**2)
+    vorticity_max.append(np.max(omega_mag))
+
+    t += dt
+plt.figure(figsize=(8, 5))
+plt.plot(np.arange(0, T, dt), vorticity_max, label=r"$\|\nabla \times \mathbf{u}\|_{L^\infty}$")
+plt.xlabel("Time")
+plt.ylabel("Max Vorticity")
+plt.title("Vorticity Growth in 3D Navier-Stokes Simulation")
+plt.legend()
+plt.grid()
+plt.show()
